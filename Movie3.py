@@ -1,5 +1,4 @@
 import re,requests,pymongo
-from concurrent.futures.process import ProcessPoolExecutor
 from queue import Queue
 import _thread
 import pandas as pd
@@ -7,39 +6,10 @@ from multiprocessing import Pool
 import xlwt,xlrd
 import time
 import pymysql
-import string
 from myDb import connection_to_mysql
 #from fake_useragent import UserAgent
 
 start =time.time()
-
-conn=pymysql.connect('localhost','root','password')
-#获取游标
-cur=conn.cursor()
-cur.execute('CREATE DATABASE IF NOT EXISTS Douban DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci;')
-conn.select_db('douban')
-#创建user表
-cur.execute('drop table if exists Mylist')
-sql="""CREATE TABLE IF NOT EXISTS `Mylist` (
-	  `id` int(11) NOT NULL AUTO_INCREMENT,
-	  `Name` varchar(255) NOT NULL,
-	  `Rate` float(11) NOT NULL,
-	  `MyRate` int(11) NOT NULL,
-	  `Num` int(11) NOT NULL,
-	  `Director` varchar(255) NOT NULL,
-	  `Type` varchar(255) NOT NULL,
-	  `MyComment` varchar(255) NOT NULL,
-	  PRIMARY KEY (`id`)
-	) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 AUTO_INCREMENT=0"""
-
-cur.execute(sql)
-
-''''#修改前查询所有数据
-cur.execute("select * from mylist;")
-print('修改前的数据为：')
-for res in cur.fetchall():
-      print (res)
-print ('*'*40)
 '''
 def get_random_proxy():
     """
@@ -48,25 +18,16 @@ def get_random_proxy():
     """
     proxypsslUrl = 'http://127.0.0.1:5555/random'
     return requests.get(proxypsslUrl).text.strip()
-
-
+'''
 class DataTool(object):
     def __init__(self):
-        # 创建一个客户端对象
-        self.client = pymongo.MongoClient("mongodb://localhost:27017/")
-
-        # 根据这个客户端对象，连接数据库
-        self.db = self.client['FilmList']
-
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
         }
 
     def newTupleData(self,originTupleData,rate,comments):
         print(rate*2)
-     #   print(comments)
         newDict = {}
-        #if(len(originTupleData) == 6):
         p1 = re.compile(r'<li>', re.S)
         p2 = re.compile(r'</li>', re.S)
         # pass_</span>
@@ -108,7 +69,6 @@ class DataTool(object):
         print(comment)
         newDict['个人评价'] = comment
 
-        self.db['dB'].insert_one(newDict)
         return newDict
 
 class Excel(object):
@@ -116,6 +76,7 @@ class Excel(object):
     # 读取数据
     def __init__(self):
         # 创建工作簿
+        #self.cur, self.conn = mySql.CtM()
         self.excelWorkBook = xlwt.Workbook('utf-8')
 
         # 创建一个excel表
@@ -132,25 +93,23 @@ class Excel(object):
     def write_data(self,row,movieDataDict):
         # ----------处理电影信息------------
         # 由字典转化成列表
+        dr = pd.DataFrame(movieDataDict,index = [0])
         eachDetail = []
         for value in movieDataDict.values():
             eachDetail.append(value)
-        # ----------------------------------
-        print(self.engine)
         # 把电影数据写入表格
         for i in range(0,len(self.rowTitle)):
             self.excelWorkSheet.write(row,i,eachDetail[i])
+        eachDetail = eachDetail[0:-1]
+        #del dr['_id']
 
-        df = pd.DataFrame(eachDetail)
+        df = dr.astype(object).where(pd.notnull(dr), None)
+        df.rename(columns={'名称': 'Name', '电影评分': 'Rate', '个人评分': 'MyRate', '评价人数': 'Num', '导演': 'Director', '类型': 'Type', '个人评价': 'MyComment'}, inplace=True)
         print(df)
-        #df.to_sql('mylist2', self.engine, index=False, if_exists='append')
-        #myDb = create_engine('mysql+mysqldb://root:password@localhost:3306/Douban?charset=utf8')
-        #df.to_sql('mylist2', self.engine, index=False, if_exists='append')
-        cur.execute("insert into mylist values(null,'%s',%s,%s,%s,'%s','%s','%s')"%(pymysql.escape_string(str(eachDetail[0])), float(eachDetail[1]), int(eachDetail[2]), int(eachDetail[3]), str(eachDetail[4]), str(eachDetail[5]),str(eachDetail[6])))
+        df.to_sql('mylist2', self.engine, index=False, dtype=None, if_exists='append')
     def saveExcelData(self):
         # 这个保存是在建立一个工作簿那个对象进行保存的
         self.excelWorkBook.save('E:\Desktop\douban.xls')
-
 
 class DouBan(object):
     def __init__(self):
@@ -165,11 +124,10 @@ class DouBan(object):
         self.base_page_url = 'https://movie.douban.com/people/GawainT/collect?start={}'
 
     def startCrawl(self,num):
-
         # 使用代理ip
        # proxy = self.proxy_list
-        proxies = {'http' : get_random_proxy()}
-        print('get random proxy', proxies)
+       # proxies = {'http' : get_random_proxy()}
+       # print('get random proxy', proxies)
         page_url = self.base_page_url.format(num)
         try:
             response = requests.get(page_url,headers=self.headers)
@@ -185,15 +143,11 @@ class DouBan(object):
             print('请求异常：url = {}, error = {}'.format(page_url,e))
             print(response.text)
             return None
-
     # 获取详首页电影的 top_no movie_url,返回一个列表
     def myList(self,pageHtml):
         # 书写正则表达式
-       # pattern = re.compile(r'<ul>.*?<li class="title">.*?<a href="(.*?)" class>',re.S)
-      #  while self.first_running or not self.qurl.empty():
          pattern = re.compile(r'<div class="pic">.*?<a title="(.*?)" href="(.*?)" .*?>.*?<div class="info">.*?<li>.*?class="rating(.*?)-t">.*?class="date">.*?</span>.*?(.*?)</div>', re.S)
          movieInfoList = re.findall(pattern,pageHtml)
-        # test
          print(movieInfoList)
          return movieInfoList
     # 获取电影信息源码
@@ -249,16 +203,6 @@ if __name__ == '__main__':
                 print(newData)
                 pool.close()
                 pool.join()
-           # print(total)# 运行完程序再保存
     xcl.saveExcelData()
-    cur.execute("select * from mylist;")
-    print('修改后的数据为：')
-    for res in cur.fetchall():
-        print(res)
-    print('*' * 40)
-    cur.close()
-    conn.commit()
-    conn.close()
-    print('sql执行成功')
 end =time.time()
 print('Cost time:',end-start)

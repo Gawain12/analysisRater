@@ -17,10 +17,9 @@ class MyDoubanList(Base):
     创建表
     """
     __tablename__ = 'mylist2'
-
     # 表的结构:
     id = Column(INTEGER, primary_key=True, autoincrement=True)
-    Name = Column(String(20))
+    Name = Column(String(100), primary_key=True)
     Rate = Column(Text)
     MyRate = Column(Text)
     Num = Column(Text)
