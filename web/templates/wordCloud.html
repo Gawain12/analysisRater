@@ -1,0 +1,103 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <script src='https://cdn.bootcss.com/echarts/3.7.0/echarts.simple.js'></script>
+        <script src="http://libs.baidu.com/jquery/1.7.2/jquery.min.js"></script>
+        <script src="https://cdn.bootcss.com/echarts/4.1.0.rc2/echarts.min.js"></script>
+        <script src='../static/echarts-wordcloud.js'></script>
+
+    </head>
+    <body>
+        <style>
+            html, body, #main {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+            }
+        </style>
+        <div id='main'></div>
+        <div id="main2" style="width: 1800px;height: 900px;"></div>
+        <div id="main3" style="width: 1800px;height: 900px;"></div>
+        <script>
+            var myChart1 = echarts.init(document.getElementById('main'));
+
+            myChart1.setOption({
+                tooltip: {},
+                series: [ {
+                    type: 'wordCloud',
+                    gridSize: 2,
+                    sizeRange: [12, 50],
+                    rotationRange: [-90, 90],
+                    shape: 'pentagon',
+                    width: 600,
+                    height: 400,
+                    drawOutOfBound: true,
+                    textStyle: {
+                        normal: {
+                            color: function () {
+                                return 'rgb(' + [
+                                    Math.round(Math.random() * 160),
+                                    Math.round(Math.random() * 160),
+                                    Math.round(Math.random() * 160)
+                                ].join(',') + ')';
+                            }
+                        },
+                        emphasis: {
+                            shadowBlur: 10,
+                            shadowColor: '#333'
+                        }
+                    },
+                    data: [
+                        {
+                            name: 'Sam S Club',
+                            value: 10000,
+                            textStyle: {
+                                normal: {
+                                    color: 'black'
+                                },
+                                emphasis: {
+                                    color: 'red'
+                                }
+                            }
+                        },
+                        {
+                            name: 'Macys',
+                            value: 6181
+                        },
+                        {
+                            name: 'Amy Schumer',
+                            value: 4386
+                        },
+                        {
+                            name: 'Jurassic World',
+                            value: 4055
+                        },
+
+                        {
+                            name: 'Farrah Abraham',
+                            value: 366
+                        },
+                        {
+                            name: 'Rita Ora',
+                            value: 360
+                        },
+                        {
+                            name: 'Serena Williams',
+                            value: 282
+                        },
+                        {
+                            name: 'NCAA baseball tournament',
+                            value: 273
+                        },
+                        {
+                            name: 'Point Break',
+                            value: 265
+                        }
+                    ]
+                } ]
+            });
+
+            window.onresize = chart.resize;
+        </script>
+    </body>
+</html>
