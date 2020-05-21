@@ -1,15 +1,23 @@
-import re,requests,pymongo
-from queue import Queue
-import _thread
-import pandas as pd
-from multiprocessing import Pool
-import xlwt,xlrd
-import time
-import pymysql
-from myDb import connection_to_mysql
-#from fake_useragent import UserAgent
+import asyncio
+import re
 
-start =time.time()
+from fake_useragent import UserAgent
+import aiohttp
+import pandas as pd
+import xlwt
+import time
+
+from Analysis.WeightScore import *
+from Database.myDb import connection_to_mysql
+from haipproxy.client.py_cli import ProxyFetcher
+import Database.myDb
+
+
+args = dict(host='127.0.0.1', port=6379, password=None, db=0)
+fetcher = ProxyFetcher('douban', strategy='greedy', redis_args=args)
+
+ua = UserAgent()
+print(ua.random)
 '''
 def get_random_proxy():
     """
@@ -22,11 +30,11 @@ def get_random_proxy():
 class DataTool(object):
     def __init__(self):
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
+            'User-Agent': ua.random,
         }
 
     def newTupleData(self,originTupleData,rate,comments):
-        print(rate*2)
+        #print(rate*2)
         newDict = {}
         p1 = re.compile(r'<li>', re.S)
         p2 = re.compile(r'</li>', re.S)
@@ -41,7 +49,8 @@ class DataTool(object):
         p7 = re.compile(r'<spanclass="comment">', re.S)
         p8= re.compile(r'</ul>', re.S)
         p9 = re.compile(r'<spanclass="tags">', re.S)
-        p10 = re.compile(r'&#39;')
+        p10 = re.compile(r'&#39;',re.S)
+        p11 = re.compile(r'&#34;',re.S)
 
         name = re.sub(p10, "'", originTupleData[0])
         newDict['名称'] = name
@@ -65,8 +74,10 @@ class DataTool(object):
         comment = re.sub(p7, '', comment)
         comment = re.sub(p8, '', comment)
         comment = re.sub(p9, '', comment)
+        comment = re.sub(p10, '', comment)
+        comment = re.sub(p11, '', comment)
 
-        print(comment)
+        #print(comment)
         newDict['个人评价'] = comment
 
         return newDict
@@ -90,7 +101,7 @@ class Excel(object):
             self.excelWorkSheet.write(0,i,self.rowTitle[i])
         self.saveExcelData()
        # 写入数据
-    def write_data(self,row,movieDataDict):
+    def writeData(self,row,movieDataDict,name):
         # ----------处理电影信息------------
         # 由字典转化成列表
         dr = pd.DataFrame(movieDataDict,index = [0])
@@ -102,11 +113,10 @@ class Excel(object):
             self.excelWorkSheet.write(row,i,eachDetail[i])
         eachDetail = eachDetail[0:-1]
         #del dr['_id']
-
         df = dr.astype(object).where(pd.notnull(dr), None)
         df.rename(columns={'名称': 'Name', '电影评分': 'Rate', '个人评分': 'MyRate', '评价人数': 'Num', '导演': 'Director', '类型': 'Type', '个人评价': 'MyComment'}, inplace=True)
-        print(df)
-        df.to_sql('mylist2', self.engine, index=False, dtype=None, if_exists='append')
+        #print(df)
+        df.to_sql(name, self.engine, index=False, dtype=None, if_exists='append')
     def saveExcelData(self):
         # 这个保存是在建立一个工作簿那个对象进行保存的
         self.excelWorkBook.save('E:\Desktop\douban.xls')
@@ -114,95 +124,121 @@ class Excel(object):
 class DouBan(object):
     def __init__(self):
         self.headers = {
-            'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36 SE 2.X MetaSr 1.0',
+            'User-Agent' : ua.random,
             'Cookie':'ll="118237"; bid=miJfnEe9C8E; __yadk_uid=C8tCYDQmeHxAfZlS5hvnGCCLtrU72prh; douban-fav-remind=1; ps=y; _pk_ref.100001.4cf6=%5B%22%22%2C%22%22%2C1547354707%2C%22https%3A%2F%2Fopen.weixin.qq.com%2Fconnect%2Fqrconnect%3Fappid%3Dwxd9c1c6bbd5d59980%26redirect_uri%3Dhttps%253A%252F%252Fwww.douban.com%252Faccounts%252Fconnect%252Fwechat%252Fcallback%26response_type%3Dcode%26scope%3Dsnsapi_login%26state%3DmiJfnEe9C8E%252523douban-web%252523https%25253A%252F%252Fmovie.douban.com%252Ftop250%25253Fstart%25253D125%252526filter%25253D%22%5D; _pk_id.100001.4cf6=4179da9d4af6318e.1543568427.5.1547358498.1547349967.; _vwo_uuid_v2=D4FCFEDCB33DF07B2DE0DC525D42F7488|9024e242bbd9c0f98192b002e4091fc3; as="https://sec.douban.com/b?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F26430107%2F"; dbcl2="189997368:Qj2bbphj+X0"; ck=iccT; push_noty_num=0; push_doumail_num=0'
         }
         # 设置代理ip
         #self.proxy_list = {
              #"http": "http://202.121.96.33:8086",
          #}
-        self.base_page_url = 'https://movie.douban.com/people/GawainT/collect?start={}'
-
-    def startCrawl(self,num):
+        self.base_pageUrl = 'https://movie.douban.com/people/{}/collect?start={}'
+        self.proxies=fetcher.get_proxy()
+    async def startCrawl(self,sem,session,num,name):
         # 使用代理ip
        # proxy = self.proxy_list
        # proxies = {'http' : get_random_proxy()}
        # print('get random proxy', proxies)
-        page_url = self.base_page_url.format(num)
+      print(fetcher.get_proxy())
+      async with sem:
         try:
-            response = requests.get(page_url,headers=self.headers)
-            if response.status_code == 200:
-                pageHtml = response.text
-                print('请求成功：url = {}, status_code = {}'.format(page_url, response.status_code))
-                return pageHtml
-            else:
-                print('请求错误：url = {}, status_code = {}'.format(page_url,response.status_code))
-                print(response.text)
-                return None
+            print('This is %s doubanlist' %name)
+            print("Crawing %s" % num)
+            pageUrl = self.base_pageUrl.format(name,num)
+            async with await session.get(pageUrl, headers=self.headers) as response:
+                    if response.status == 200:
+                        print('请求成功：url = {}, status = {}'.format(pageUrl, response.status))
+                        responseText = await response.text()
+                        print("%s 爬取完毕......" % num )
+                        return responseText
+                    else:
+                        print('请求错误：url = {}, status = {}'.format(pageUrl, response.status))
+                        return None
         except Exception as e:
-            print('请求异常：url = {}, error = {}'.format(page_url,e))
-            print(response.text)
-            return None
-    # 获取详首页电影的 top_no movie_url,返回一个列表
-    def myList(self,pageHtml):
+            print('请求异常：url = {}, error = {}'.format(pageUrl, e))
+    # 获取详首页电影的 top_no movieUrl,返回一个列表
+    async def myList(self,pageHtml,urlsLists):
         # 书写正则表达式
          pattern = re.compile(r'<div class="pic">.*?<a title="(.*?)" href="(.*?)" .*?>.*?<div class="info">.*?<li>.*?class="rating(.*?)-t">.*?class="date">.*?</span>.*?(.*?)</div>', re.S)
          movieInfoList = re.findall(pattern,pageHtml)
-         print(movieInfoList)
-         return movieInfoList
+
+         urlsLists.extend(movieInfoList)
+         print(urlsLists)
+         return urlsLists
     # 获取电影信息源码
-    def myHtml(self,movie_url):
-        try:
-            response = requests.get(movie_url,headers=self.headers)
-            if response.status_code == 200:
-                moviePageHtml = response.text
-                return  moviePageHtml
-            else:
-                print('请求错误：url = {}, status_code = {}'.format(movie_url,response.status_code))
-                return None
-        except Exception as e:
-            print('请求异常：url = {}, error = {}'.format(movie_url,e))
+    async def myHtml(self,sem,session,movieUrl):
+     print(fetcher.get_proxy())
+     async with sem:
+      try:
+            async with await session.get(movieUrl,headers=self.headers) as response:
+                if response.status == 200:
+                    #print(response.status)
+                    responseText = await response.text()
+                    return responseText
+                else:
+                    print('请求错误：url = {}, status = {}'.format(movieUrl, response.status))
+                    return None
+      except Exception as e:
+                print('请求异常：url = {}, error = {}'.format(movieUrl, e))
     # 获取电影的详细信息
-    def movieDetails(self,movieHtml):
+    async def movieDetails(self,movieHtml,row,rate,comment,name):
 
         pattern = re.compile(r'<div id="content">.*?<h1>.*?>(.*?)</span>.*? rel="v:directedBy">(.*?)</a>.*?<span class="pl".*?</span>(.*?)<br/>.*?<span class="pl">制片国家.*?<strong class="ll rating_num" property="v:average">(.*?)</strong>.*?<span property="v:votes">(.*?)</span>',re.S)
         movie_data = re.findall(pattern,str(movieHtml))
         # 测试输出
         print(movie_data)
+        for movieTuple in movie_data:
+            newData = DataTool().newTupleData(movieTuple, rate, comment)
+            Excel().writeData(row, newData,name)
+            row += 1
+            print(newData)
+        Excel().saveExcelData()
         if movie_data is None:
             return None
         return movie_data
         # 保存到数据库中
+    async def handle(self,sem,url,row,rate,comment,name):
+        async with aiohttp.ClientSession() as session:
+                html = await DouBan().myHtml(sem,session,url)
+                await DouBan().movieDetails(html,row,rate,comment,name)
 
-if __name__ == '__main__':
+    async def download(self,sem,num,urlsLists,name):
+        async with aiohttp.ClientSession() as session:
+                html = await DouBan().startCrawl(sem,session,num,name)
+                await DouBan().myList(html,urlsLists)
+def main(name):
+
+    start = time.time()
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
     dbObj = DouBan()
-    Tool = DataTool()
-    xcl =Excel()
-    # row = 1 是为了保存到Excel中 做的处理
     row = 1
-    pool = Pool(8)
-    for i in range(0,10):
-      if i%15 == 0:
-        pageHtml = dbObj.startCrawl(i)
-        # print(pageHtml)
-        urlsList = dbObj.myList(pageHtml)
-        #pool.map(dbObj.myList, pageHtml)
-        for eachUrl in urlsList:
-            #movieHtml=pool.map(dbObj.myHtml,urlsList)
-            #print('List sss')
-            movieHtml = dbObj.myHtml(eachUrl[1])
-            eachDetail = dbObj.movieDetails(movieHtml)
-            rate = int(eachUrl[2])
-            comment = eachUrl[3]
-            #eachDetail=pool.map(dbObj.movieDetails, movieHtml)
-            print(eachDetail)
-            for movieTuple in eachDetail:
-                newData = Tool.newTupleData(movieTuple,rate,comment)
-                xcl.write_data(row,newData)
-                row += 1
-                print(newData)
-                pool.close()
-                pool.join()
-    xcl.saveExcelData()
-end =time.time()
-print('Cost time:',end-start)
+    print(name)
+    Database.myDb.CreateTb(name)
+    sem = asyncio.Semaphore(100)
+    urlsLists = []
+    tasks = []
+    for i in range(0, 10):
+        if i % 15 == 0:
+            task = asyncio.ensure_future(dbObj.download(sem, i, urlsLists, name))
+            tasks.append(task)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(asyncio.wait(tasks))
+
+    taskList = []
+    for eachUrl in urlsLists:
+        rate = int(eachUrl[2])
+        comment = eachUrl[3]
+        task = asyncio.ensure_future(dbObj.handle(sem, eachUrl[1], row, rate, comment,name))
+        taskList.append(task)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(asyncio.wait(taskList))
+
+    Total = ARate(name) * 0.3 + RVolume(name) * 0.18 + Type(name) * 0.22 + Tspdt(name) * 0.3
+    Users = User(Id=None,Name=name, Rvolume=RVolume(name), Type=Type(name), Tspdt=Tspdt(name), Wrate=ARate(name), Score=float(Total))
+    db_session.add(Users)
+    db_session.commit()
+    end = time.time()
+    print('Cost time:', end - start)
+'''Name=web.app.req().name
+print(Name)
+main(Name)'''
