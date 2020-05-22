@@ -7,14 +7,14 @@ import pandas as pd
 import xlwt
 import time
 
-from Analysis.WeightScore import *
-from Database.myDb import connection_to_mysql
-from haipproxy.client.py_cli import ProxyFetcher
-import Database.myDb
+from Douban.Analysis.WeightScore import *
+from Douban.Database.myDb import connection_to_mysql
+#from haipproxy.client.py_cli import ProxyFetcher
+import Douban.Database.myDb
 
 
 args = dict(host='127.0.0.1', port=6379, password=None, db=0)
-fetcher = ProxyFetcher('douban', strategy='greedy', redis_args=args)
+#fetcher = ProxyFetcher('douban', strategy='greedy', redis_args=args)
 
 ua = UserAgent()
 print(ua.random)
@@ -132,13 +132,13 @@ class DouBan(object):
              #"http": "http://202.121.96.33:8086",
          #}
         self.base_pageUrl = 'https://movie.douban.com/people/{}/collect?start={}'
-        self.proxies=fetcher.get_proxy()
+        #self.proxies=fetcher.get_proxy()
     async def startCrawl(self,sem,session,num,name):
         # 使用代理ip
        # proxy = self.proxy_list
        # proxies = {'http' : get_random_proxy()}
        # print('get random proxy', proxies)
-      print(fetcher.get_proxy())
+      #print(fetcher.get_proxy())
       async with sem:
         try:
             print('This is %s doubanlist' %name)
@@ -166,7 +166,7 @@ class DouBan(object):
          return urlsLists
     # 获取电影信息源码
     async def myHtml(self,sem,session,movieUrl):
-     print(fetcher.get_proxy())
+     #print(fetcher.get_proxy())
      async with sem:
       try:
             async with await session.get(movieUrl,headers=self.headers) as response:
@@ -213,7 +213,7 @@ def main(name):
     dbObj = DouBan()
     row = 1
     print(name)
-    Database.myDb.CreateTb(name)
+    CreateTb(name)
     sem = asyncio.Semaphore(100)
     urlsLists = []
     tasks = []

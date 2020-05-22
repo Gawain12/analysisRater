@@ -1,5 +1,5 @@
-from Analysis import DataProcessing
-from Database.myDb import *
+from Douban.Analysis import DataProcessing
+from Douban.Database.myDb import *
 from sqlalchemy import *
 import numpy as np
 from flask import Flask
@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 
-from Analysis import *
 engine, db_session = connection_to_mysql()
 plt.rcParams['font.sans-serif'] = 'Microsoft YaHei'
 plt.rcParams['axes.unicode_minus'] = False
