@@ -4,7 +4,6 @@ import re
 from fake_useragent import UserAgent
 import aiohttp
 import pandas as pd
-import xlwt
 import time
 
 from Douban.Analysis.WeightScore import *
@@ -28,10 +27,6 @@ def get_random_proxy():
     return requests.get(proxypsslUrl).text.strip()
 '''
 class DataTool(object):
-    def __init__(self):
-        self.headers = {
-            'User-Agent': ua.random,
-        }
 
     def newTupleData(self,originTupleData,rate,comments):
         #print(rate*2)
@@ -82,24 +77,12 @@ class DataTool(object):
 
         return newDict
 
-class Excel(object):
+class DataFrame(object):
 
     # 读取数据
     def __init__(self):
-        # 创建工作簿
-        #self.cur, self.conn = mySql.CtM()
-        self.excelWorkBook = xlwt.Workbook('utf-8')
-
-        # 创建一个excel表
-        self.excelWorkSheet = self.excelWorkBook.add_sheet('个人豆瓣观影记录', cell_overwrite_ok=True)
-
-        # 创建第一行 标题
-        self.rowTitle = ['电影名称','豆瓣评分','个人评分','评价人数','导演','类型','个人评价']
+       
         self.engine, self.pymysql_session = connection_to_mysql()
-        # 把第一行写入表格
-        for i in range(0,len(self.rowTitle)):
-            self.excelWorkSheet.write(0,i,self.rowTitle[i])
-        self.saveExcelData()
        # 写入数据
     def writeData(self,row,movieDataDict,name):
         # ----------处理电影信息------------
@@ -108,18 +91,12 @@ class Excel(object):
         eachDetail = []
         for value in movieDataDict.values():
             eachDetail.append(value)
-        # 把电影数据写入表格
-        for i in range(0,len(self.rowTitle)):
-            self.excelWorkSheet.write(row,i,eachDetail[i])
-        eachDetail = eachDetail[0:-1]
-        #del dr['_id']
+      
         df = dr.astype(object).where(pd.notnull(dr), None)
         df.rename(columns={'名称': 'Name', '电影评分': 'Rate', '个人评分': 'MyRate', '评价人数': 'Num', '导演': 'Director', '类型': 'Type', '个人评价': 'MyComment'}, inplace=True)
         #print(df)
         df.to_sql(name, self.engine, index=False, dtype=None, if_exists='append')
-    def saveExcelData(self):
-        # 这个保存是在建立一个工作簿那个对象进行保存的
-        self.excelWorkBook.save('E:\Desktop\douban.xls')
+
 
 class DouBan(object):
     def __init__(self):
@@ -183,18 +160,16 @@ class DouBan(object):
     async def movieDetails(self,movieHtml,row,rate,comment,name):
 
         pattern = re.compile(r'<div id="content">.*?<h1>.*?>(.*?)</span>.*? rel="v:directedBy">(.*?)</a>.*?<span class="pl".*?</span>(.*?)<br/>.*?<span class="pl">制片国家.*?<strong class="ll rating_num" property="v:average">(.*?)</strong>.*?<span property="v:votes">(.*?)</span>',re.S)
-        movie_data = re.findall(pattern,str(movieHtml))
+        movieData = re.findall(pattern,str(movieHtml))
         # 测试输出
-        print(movie_data)
-        for movieTuple in movie_data:
+        print(movieData)
+        for movieTuple in movieData:
             newData = DataTool().newTupleData(movieTuple, rate, comment)
-            Excel().writeData(row, newData,name)
             row += 1
             print(newData)
-        Excel().saveExcelData()
-        if movie_data is None:
+        if movieData is None:
             return None
-        return movie_data
+        return movieData
         # 保存到数据库中
     async def handle(self,sem,url,row,rate,comment,name):
         async with aiohttp.ClientSession() as session:
@@ -239,6 +214,7 @@ def main(name):
     db_session.commit()
     end = time.time()
     print('Cost time:', end - start)
+
 '''Name=web.app.req().name
-print(Name)
-main(Name)'''
+print(Name)'''
+main('gawain')

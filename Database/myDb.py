@@ -18,6 +18,7 @@ def CreateTb(name):
         创建表
         """
         __tablename__ = name
+        __table_args__ = {"useexisting": True}
         # 表的结构:
         Id = Column(INTEGER, primary_key=True, autoincrement=True)
         Name = Column(String(100), primary_key=True)

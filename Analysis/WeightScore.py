@@ -24,7 +24,7 @@ def Tspdt(name):
     #Names = db_session.execute('select * from tspdt').fetchall()
     print(Names[0][0])
     Rate1=100*Names[0][0]/600
-    print(Rate1)
+    print('The Rate of Tspdt is  %f' %Rate1)
     '''for Name in Names:
         print(Name[0])'''
     return Rate1
@@ -50,7 +50,7 @@ def ARate(name):
     #print(Rate2)
 def RVolume(name):
     Num=db_session.execute("select Count(*) from {}".format(name)).fetchall()
-    print(Num[0][0])
+    print('My Reading Volume is %f' %Num[0][0])
     Rate3=100*Num[0][0]/4000
     print(Rate3)
     return Rate3
@@ -69,7 +69,7 @@ def Type(name):
                 rate+=1
         else:
             print('%s is not in the list' %a[i])
-    print(rate)
+    print("My Type Rate is: %f"%rate)
     #print(Type[0][0])
     Rate4=rate/22*100
     print(Rate4)

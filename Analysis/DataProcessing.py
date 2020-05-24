@@ -17,7 +17,7 @@ import pandas as pd
 
 from Douban.Database.myDb import connection_to_mysql
 import matplotlib.pyplot as plt
-import seaborn as sns
+#import seaborn as sns
 
 # 显示所有列
 pd.set_option('display.max_columns', None)
@@ -31,6 +31,7 @@ pd.set_option('display.max_columns', 500)
 plt.rcParams['font.sans-serif']=['SimHei']
 plt.rcParams['axes.unicode_minus']=False
 
+'''
 def sns_set():
     """
     sns 相关设置
@@ -50,7 +51,7 @@ def sns_set():
     sns.set(font='SimHei')
 
     return sns
-
+'''
 
 def read_data(name):
     """
@@ -70,7 +71,7 @@ def read_data(name):
     """
 
     ''' 1. 查看整体数据类型与缺失情况'''
-    print(data.info())
+    #print(data.info())
     ''' 
      0   Id         910 non-null    int64 
  1   Name       910 non-null    object
@@ -84,16 +85,16 @@ def read_data(name):
     '''
     # 对于部分影片缺失又名信息，用影片名称去填充即可
     data['MyComment'].fillna(data['MyRate'], inplace=True)
-    print(data.info())
+    #print(data.info())
 
     ''' 2. 查看单个指标的数据，并进行相应的清洗操作'''
 
     # 3. 影片制作国家，可以看到数据形式是 xx / xx 的形式， 用 / 分割，数据规整，但需要对空格进行处理
-    print(data['Type'].head(10))
+    #print(data['Type'].head(10))
     # 这里直接去空格进行替换
     data['Type'] = data['Type'].str.replace(' ', '')
     # 7. 影片总评分，影片评论数，设置为相应的数据格式即可
-    print(data[['Rate', 'Num']].head(10))
+    #print(data[['Rate', 'Num']].head(10))
     # 这里将影片总评分转换为 float、影评人数转换为 int（默认都是 object类型）
     data['Rate'] = data['Rate'].astype(float)
     data['Num'] = data['Num'].astype(int)
@@ -110,10 +111,10 @@ def type(df_data):
     # 生成柱状图的数据 x 和 y
     movie_type_x = movie_type_counter.index.tolist()
     movie_type_y = movie_type_counter.values.tolist()
-    print(movie_type_x)
-    print(movie_type_y)
+    #print(movie_type_x)
+    #print(movie_type_y)
     # 画出影片类型的柱状图
-    ax1 = sns.barplot(x=movie_type_x, y=movie_type_y, palette="Blues_r", )
+    ''' ax1 = sns.barplot(x=movie_type_x, y=movie_type_y, palette="Blues_r", )
     # Seaborn 需要通过 ax.set_title() 来添加 title
     ax1.set_title('个人观影类型统计    by:『Gawain』')
     # 设置 x/y 轴标签的字体大小和字体颜色
@@ -124,7 +125,7 @@ def type(df_data):
     # 显示数据的具体数值
     for x, y in zip(range(0, len(movie_type_x)), movie_type_y):
         ax1.text(x - 0.3, y + 0.3, '%d' % y, color='black')
-    #plt.show()
+    #plt.show()'''
     return movie_type_x,movie_type_y
 
 
@@ -135,7 +136,7 @@ def view_data(df_data):
     @return:
     """
     # 声明使用 Seaborn 样式
-    sns = sns_set()
+    #sns = sns_set()
 
     '''1. 数据认识与探索'''
     print(df_data.info())
@@ -171,7 +172,7 @@ def view_data(df_data):
     movie_type_x = movie_type_counter.index.tolist()
     movie_type_y = movie_type_counter.values.tolist()
 
-    # 画出影片类型的柱状图
+    '''   # 画出影片类型的柱状图
     ax1 = sns.barplot(x=movie_type_x, y=movie_type_y, palette="Blues_r", )
     # Seaborn 需要通过 ax.set_title() 来添加 title
     ax1.set_title('个人观影类型统计    by:『Gawain』')
@@ -183,9 +184,10 @@ def view_data(df_data):
     # 显示数据的具体数值
     for x, y in zip(range(0, len(movie_type_x)), movie_type_y):
         ax1.text(x - 0.3, y + 0.3, '%d' % y, color='black')
-    plt.show()
+    plt.show()'''
+
     '''2.1.2导演出现次数'''
-    df_data['DirectorArr'] = df_data['Director'].map(lambda e: e.split('/'))
+    ''' df_data['DirectorArr'] = df_data['Director'].map(lambda e: e.split('/'))
     movie_dir_list = np.concatenate(df_data['DirectorArr'].values.tolist())
     # 将一维数组重新生成 Dataframe 并统计每个类型的个数
     movie_dir_counter = pd.DataFrame(movie_dir_list, columns=['Director'])['Director'].value_counts().head(10)
@@ -205,24 +207,24 @@ def view_data(df_data):
     # 显示数据的具体数值
     for x, y in zip(range(0, len(movie_dir_x)), movie_dir_y):
         ax1.text(x - 0.3, y + 0.3, '%d' % y, color='blue')
-    plt.show()
+    plt.show()'''
     ''''2.1.2 同理将影片语言数据通过 / 分割后统计每个语言出现的次数'''
 
     '''2.2 定距/定比特征分析'''
 
     '''2.2.2 将影片总评分数据通过箱型图展示'''
-    ax5 = sns.swarmplot(x=np.ones(df_data.shape[0]), y='Rate', data=df_data)
+    '''ax5 = sns.swarmplot(x=np.ones(df_data.shape[0]), y='Rate', data=df_data)
     ax5.set_title('豆瓣总评分统计    by:『Gawain』')
     ax5.set_xlabel('影片总评分分布', fontsize=10)
     ax5.set_ylabel('影片总评分', fontsize=10)
     plt.show()
-
+    '''
     ''''2.2.3 将影片评论数数据通过箱型图展示'''
-    ax6 = sns.swarmplot(x=np.ones(df_data.shape[0]), y='Num', data=df_data)
+    ''' ax6 = sns.swarmplot(x=np.ones(df_data.shape[0]), y='Num', data=df_data)
     ax6.set_title('影片评论数统计    by:『Gawain』')
     ax6.set_xlabel('影片评论数分布', fontsize=10)
     ax6.set_ylabel('影片评论数（个）', fontsize=10)
-    plt.show()
+    plt.show()'''
 
     '''3. 组合特征分析'''
 
@@ -254,7 +256,7 @@ def view_data(df_data):
     df_data['Rate'] = preprocessing.normalize(df_data[['Rate']], axis=0)
     df_data['Num'] = preprocessing.normalize(df_data[['Num']], axis=0)
     # 线性相关吗？画图吧
-    sns.lmplot('Num', 'Rate', df_data, order=4)
+    #sns.lmplot('Num', 'Rate', df_data, order=4)
     ax = plt.gca()
     ax.set_title('总评分与评论数线性相关？    by:『Gawain』')
     ax.set_xlabel('影片评论数', fontsize=10)

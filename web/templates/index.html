@@ -17,12 +17,16 @@
     </nav>
     <div ms-visible="@view_data_state == 0">
         <div class="main_container col-lg-8 col-md-12">
-            <form id="form" name="form" action="http://localhost:5000/s" method="post">
+            <form id="form" name="form" action="http://localhost:5000" method="post">
                 <div class="form-group row">
                         <label for="password" class="col-lg-3 col-md-3 label_text"
                                title="用于获取片单域名">豆瓣Id</label>
-                        <input type="text" input name="name" value="joke" class="form-control col-lg-8 col-md-12" id="password" ms-duplex="@password"
+                        <input type="text" input name="name" value="joke" class="form-control col-lg-8 col-md-12" id="name" ms-duplex="@password"
                                placeholder="注意，不是昵称，是独有域名" title="用于获取片单域名">
+                    <label for="password" class="col-lg-3 col-md-3 label_text"
+                               title="用于获取片单域名">密码</label>
+                        <input type="text" input name="password" value="joke" class="form-control col-lg-8 col-md-12" id="password" ms-duplex="@password"
+                               placeholder="" title="用于获取片单域名">
 
                 </div>
                 <div :class="['card', 'col-lg-4', 'col-md-10', 'my_card']">
@@ -44,9 +48,10 @@
                         <p class="card-text danger">所以为避免造成隐私泄漏，普通用户请在离开网页时点击下方清除缓存！！！</p>
                     </div>
                 </div>
-                <input type="submit" value="提交">
+                <input type="submit" value="提交" id="link">
             </form>
-            <div class="spider_phase" ms-visible="@login_state > 1">
+         <div id="xxx" style="display:none" >
+            <div  class="spider_phase" ms-visible="@login_state > 1">
                 <div class="my_process col-lg-8 col-md-12">
                     <!--ms-for: info in @spider_info-->
                     <p>{$info$}</p>
@@ -90,17 +95,23 @@
             <div class="spider_finish" ms-visible="@spider_state == 2">
                 <div class="col-lg-8 col-md-12" style="margin: 20px auto 50px auto">
                     <p ms-visible="@data_state == 0"> {$clean_data_text$}</p>
-                    <a href="{{ url_for('chart',name= gawain ) }}">点击此处查看数据分析结果</a>
+                    <a href="/test/{{ name }}">点击此处查看数据分析结果</a>
                 </div>
             </div>
+         </div>
         </div>
     </div>
     </div>
-
-
 </div>
 </body>
+<script type="text/javascript">
+    var name="{{ name }}";
+    if(name)
+    {document.getElementById("xxx").style.display="block";
+    }
+    else{document.getElementById("xxx").style.display="none";}
 
+</script>
 <script src="../static/constant.js"></script>
 <script src="https://cdn.bootcss.com/jquery/3.2.0/jquery.min.js"></script>
 <script src="https://cdn.bootcss.com/echarts/3.8.5/echarts.min.js"></script>
