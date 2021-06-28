@@ -10,9 +10,9 @@ import pymysql
 from zhon.hanzi import punctuation
 
 
-from Douban.Spider.Movie3 import *
-from Douban.Analysis import DataProcessing
-from Douban.Database.myDb import *
+from Spider.Movie3 import *
+from Analysis import DataProcessing
+from Database.myDb import *
 app = Flask(__name__)
 app.secret_key = '!@#$%^&*()11'
 app.debug = True

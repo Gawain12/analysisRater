@@ -9,10 +9,10 @@ import xlwt
 import time
 import redis
 
-from Douban.Analysis.WeightScore import *
-from Douban.Database.myDb import connection_to_mysql
+from Analysis.WeightScore import *
+from Database.myDb import connection_to_mysql
 #from haipproxy.client.py_cli import ProxyFetcher
-import Douban.Database.myDb
+import Database.myDb
 pool = redis.ConnectionPool(host='localhost', port=6379,decode_responses=True)
 conn = redis.Redis(connection_pool=pool)
 
@@ -141,7 +141,7 @@ class DouBan(object):
         #self.proxy_list = {
              #"http": "http://202.121.96.33:8086",
          #}
-        self.basePageUrl = 'https://movie.douban.com/people/{}/collect?start={}'
+        self.basePageUrl = 'https://movie.com/people/{}/collect?start={}'
         #self.proxies=fetcher.get_proxy()
     def Num(self,na,name):
         pageUrl = self.basePageUrl.format(name, 0)
