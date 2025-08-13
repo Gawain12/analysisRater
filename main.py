@@ -23,7 +23,6 @@ def main():
             douban_command = [python_executable, "scrapers/douban_scraper.py"]
             if args.full_scrape:
                 douban_command.append("--full-scrape")
-            douban_command.append(args.user)
             subprocess.run(douban_command, check=True)
         if args.scrape == 'imdb' or args.scrape == 'all' or args.full_pipeline:
             print("--- Running IMDb Scraper ---")

@@ -187,32 +187,54 @@ def main():
     start_time = time.time()
     print("="*60 + "\n" + " IMDb 评分导出工具 V-Final (增量更新)".center(66) + "\n" + "="*60)
     try:
-        # Step 1: 运行抓取器
         scraper = IMDbRatingsScraper()
-        newly_scraped_movies = scraper.scrape_interleaved()
         
-        # Step 2: 保存
+        # Define the output path in the parent directory
+        output_filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f"imdb_{scraper.user_id}_ratings.csv")
+        
+        # Step 1: Load existing data for incremental update
+        existing_movies = []
+        existing_rating_ids = set()
+        if os.path.exists(output_filename):
+            try:
+                with open(output_filename, 'r', newline='', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    for row in reader:
+                        existing_movies.append(row)
+                        if row.get('Const'):
+                            existing_rating_ids.add(row['Const'])
+                print(f"✅ 成功加载了 {len(existing_movies)} 条已存在的记录。")
+            except Exception as e:
+                print(f"⚠️ 读取现有CSV文件 '{output_filename}' 时出错: {e}。将执行完整扫描。")
+
+        # Step 2: Run the scraper with the set of existing IDs
+        newly_scraped_movies = scraper.scrape_interleaved(existing_rating_ids)
+        
+        # Step 3: Save results
         if newly_scraped_movies:
             print(f"\n✅ 增量更新完成，共找到 {len(newly_scraped_movies)} 条新记录。")
             
-            output_filename = f"imdb_{scraper.user_id}_ratings.csv"
-            
             export_fieldnames = ['Const', 'Your Rating', 'Date Rated', 'Title', 'URL', 'Title Type', 'IMDb Rating', 'Runtime (mins)', 'Year', 'Genres', 'Num Votes', 'Release Date', 'Directors']
-            export_data = []
+            
+            # Convert newly scraped data to the export format
+            new_export_data = []
             for movie in newly_scraped_movies:
-                export_data.append({
+                new_export_data.append({
                     'Const': movie.get('imdb_id'), 'Your Rating': movie.get('my_rating'), 'Date Rated': movie.get('rating_date'),
                     'Title': movie.get('title'), 'URL': f"https://www.imdb.com/title/{movie.get('imdb_id')}/",
                     'Title Type': movie.get('title_type'), 'IMDb Rating': movie.get('imdb_rating'), 'Runtime (mins)': movie.get('runtime_minutes'),
                     'Year': movie.get('year'), 'Genres': movie.get('genres'), 'Num Votes': movie.get('imdb_votes'),
                     'Release Date': movie.get('release_date'), 'Directors': movie.get('director')
                 })
-
+            
+            # Combine new data with existing data (newest first)
+            combined_data = new_export_data + existing_movies
+            
             with open(output_filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=export_fieldnames, extrasaction='ignore')
                 writer.writeheader()
-                writer.writerows(export_data)
-            print(f"🎉 完美！已将 {len(export_data)} 条完整记录以标准格式保存到文件: {output_filename}")
+                writer.writerows(combined_data)
+            print(f"🎉 完美！已将 {len(combined_data)} 条完整记录以标准格式保存到文件: {output_filename}")
         else:
             print("\n✅ 您的数据已是最新，无需更新。")
 
