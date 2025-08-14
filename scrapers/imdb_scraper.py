@@ -9,75 +9,33 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config.config import IMDB_CONFIG
 
-class CurlParser:
-    """一个用于解析cURL命令字符串以提取关键信息的工具类。"""
-    @staticmethod
-    def parse(curl_string):
-        headers = {};
-        try:
-            curl_string = curl_string.replace('^', '').replace('\\\n', ' ').replace('`\n', ' ')
-            header_matches = re.findall(r"-H '([^']*)'|--header '([^']*)'|\-H \"([^\"]*)\"", curl_string)
-            for header_line in [next(item for item in match if item) for match in header_matches]:
-                if ':' in header_line: key, value = header_line.split(':', 1); headers[key.strip().lower()] = value.strip()
-            cookie_match = re.search(r"--cookie '([^']*)'|--cookie \"([^\"]*)\"", curl_string)
-            if cookie_match: headers['cookie'] = next(c for c in cookie_match.groups() if c)
-            if 'cookie' not in headers: raise ValueError("cURL命令中缺少关键的 'cookie' 信息。")
-            return headers
-        except Exception as e: print(f"❌ cURL解析失败: {e}"); return None
-
 class IMDbRatingsScraper:
     """
     通过交叉获取移动端API和网页端数据，全面、高效地抓取IMDb用户评分。
     V-Final-Incremental: 支持增量更新，极大提升后续运行速度。
     """
-    AUTH_FILE = 'auth.json'; CURL_FILE = 'curl_command.txt'
-    EXPORT_FILENAME = 'imdb_ratings_export.csv'
-
     def __init__(self):
         self.user_id = IMDB_CONFIG.get('user_id')
-        if not self.user_id: raise ValueError("IMDB_CONFIG中的'user_id'未设置。")
+        self.headers = IMDB_CONFIG.get('headers', {})
+
+        # Validate that necessary headers are present in the config
+        if not self.user_id or not self.headers.get('Cookie'):
+            raise SystemExit(
+                "❌ 配置错误: 请确保在 `config.py` 的 `IMDB_CONFIG` 中提供了 'user_id', 'Cookie', 和 'x-api-key'。"
+            )
+        
+        print("✅ 已从 `config.py` 加载 IMDb 认证信息。")
+
         self.api_base_url = "https://api.graphql.imdb.com/"
         self.web_base_url = f"https://www.imdb.com/user/{self.user_id}/ratings"
         self.session = requests.Session()
-        
-        self.api_headers = self._authenticate()
-        self.web_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-
-    def _authenticate(self):
-        # (Authentication logic is unchanged)
-        if os.path.exists(self.AUTH_FILE):
-            try:
-                with open(self.AUTH_FILE, 'r', encoding='utf-8') as f: headers = json.load(f)
-                print("✅ 已从 `auth.json` 文件成功加载认证信息。")
-                return headers
-            except (json.JSONDecodeError, KeyError): print(f"⚠️ `{self.AUTH_FILE}` 文件已损坏...")
-        if os.path.exists(self.CURL_FILE) and os.path.getsize(self.CURL_FILE) > 0:
-            print(f"ℹ️ 检测到 `{self.CURL_FILE}` 文件，正在尝试解析...")
-            with open(self.CURL_FILE, 'r', encoding='utf-8') as f: curl_string = f.read()
-            headers = CurlParser.parse(curl_string)
-            if headers:
-                with open(self.AUTH_FILE, 'w', encoding='utf-8') as f: json.dump(headers, f, indent=2)
-                processed_filename = f"{self.CURL_FILE}.processed_on_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                os.rename(self.CURL_FILE, processed_filename)
-                print("\n✅ 解析成功！认证信息已保存至 `auth.json`。")
-                return headers
-            else: raise SystemExit("❌ 解析失败。")
-        else:
-            print("\n" + "="*60 + "\n⚙️ 首次运行或需要重新认证。")
-            with open(self.CURL_FILE, 'w') as f: pass
-            print(f"💡 我已在当前目录下创建了一个文件: '{self.CURL_FILE}'")
-            print(f"   请将获取的cURL命令【粘贴到 '{self.CURL_FILE}' 文件中并保存】，然后【重新运行】此脚本。")
-            raise SystemExit("="*60)
 
     def _fetch_api_page(self, cursor):
         # (Unchanged)
         payload = {"operationName": "userRatings", "variables": {"first": 250},"extensions": {"persistedQuery": {"version": 1, "sha256Hash": "ebf2387fd2ba45d62fc54ed2ffe3940086af52e700a1b3929a099d5fce23330a"}}}
         if cursor: payload['variables']['after'] = cursor
         try:
-            response = self.session.post(self.api_base_url, json=payload, headers=self.api_headers, timeout=30)
+            response = self.session.post(self.api_base_url, json=payload, headers=self.headers, timeout=30)
             response.raise_for_status(); return response.json()
         except requests.RequestException as e: print(f"❌ API请求失败: {e}"); return None
 
@@ -85,7 +43,7 @@ class IMDbRatingsScraper:
         # (Unchanged)
         url = f"{self.web_base_url}?sort=date_added,desc&page={page_num}"
         try:
-            response = self.session.get(url, headers=self.web_headers, timeout=30)
+            response = self.session.get(url, headers=self.headers, timeout=30)
             response.raise_for_status(); return response.text
         except requests.RequestException as e: print(f"❌ 网页请求失败: {e}"); return None
 

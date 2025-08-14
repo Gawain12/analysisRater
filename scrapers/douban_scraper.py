@@ -24,55 +24,75 @@ BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.
 async def fetch_imdb_id_from_web(session: aiohttp.ClientSession, douban_url: str, retries=3) -> Union[str, None]:
     """
     Asynchronously fetches a Douban movie page and parses the IMDB ID from its HTML content.
-    Includes a retry mechanism for network errors.
+    It uses the headers pre-configured in the session.
     """
     if not douban_url:
         return None
     
-    print(f"  - [Web Fetch] Cache miss, fetching IMDB ID from: {douban_url}")
-    headers = {'User-Agent': BROWSER_USER_AGENT}
+    # Do not print for validation call to keep output clean
+    if "1298697" not in douban_url:
+        print(f"  - [Web Fetch] Cache miss, fetching IMDB ID from: {douban_url}")
     
     for attempt in range(retries):
         await asyncio.sleep(random.uniform(0.5, 1.5))
         try:
-            async with session.get(douban_url, headers=headers, verify_ssl=False, timeout=30) as response:
+            # The session now has the headers, so no need to pass them here.
+            async with session.get(douban_url, verify_ssl=False, timeout=30) as response:
                 if response.status == 404:
-                    # Don't retry on a 404, the page simply doesn't exist.
-                    # print(f"⚠️ Page not found (404) for URL: {douban_url}")
                     return None
                 response.raise_for_status()
                 html_content = await response.text()
                 imdb_match = re.search(r'IMDb:</span>\s*(tt\d+)', html_content)
                 if imdb_match:
                     return imdb_match.group(1)
-                return None # Page loaded but no IMDb ID, no need to retry
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            print(f"❌ Web fetch failed (URL={douban_url}, attempt {attempt + 1}/{retries}): {e}")
-            if attempt + 1 == retries:
-                print(f"❌ Max retries reached, giving up on {douban_url}")
                 return None
-            await asyncio.sleep(3) # Wait before the next retry
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            # Suppress error for validation call, but show for others
+            if "1298697" not in douban_url:
+                print(f"❌ Web fetch failed (URL={douban_url}, attempt {attempt + 1}/{retries}): {e}")
+            if attempt + 1 == retries and "1298697" not in douban_url:
+                print(f"❌ Max retries reached, giving up on {douban_url}")
+            await asyncio.sleep(3)
     return None
 
 # ==============================================================================
 # Part 2: Main Scraper Application
 # ==============================================================================
 
-# --- 配置 ---
-try:
-    from config.config import DOUBAN_CONFIG
-    DOUBAN_USER_ID = DOUBAN_CONFIG.get('user')
-    if not DOUBAN_USER_ID:
-        raise ValueError("Douban user ID ('user') not found in config.py")
-except (ImportError, ValueError) as e:
-    print(f"⚠️  Could not load user from config: {e}. Trying environment variable...")
-    DOUBAN_USER_ID = os.environ.get('DOUBAN_USER')
-    if not DOUBAN_USER_ID:
-        DOUBAN_USER_ID = "shuaMovie"
-        print(f"⚠️  Using default User ID: {DOUBAN_USER_ID}. Please configure it properly.")
+# --- Configuration ---
+from config.config import DOUBAN_CONFIG
+
+DOUBAN_USER_ID = DOUBAN_CONFIG.get('user')
+DOUBAN_HEADERS = DOUBAN_CONFIG.get('headers', {})
+
+if not DOUBAN_USER_ID or not DOUBAN_HEADERS.get('Cookie'):
+    raise SystemExit(
+        "❌ 配置错误: 请确保在 `config.py` 的 `DOUBAN_CONFIG` 中提供了 'user' 和 'Cookie'。"
+    )
+
+print("✅ 已从 `config.py` 加载 Douban 认证信息。")
+
 
 # --- API ---
 LIST_API_URL = f"https://m.douban.com/rexxar/api/v2/user/{DOUBAN_USER_ID}/interests"
+
+# --- Validation ---
+async def validate_cookie(session):
+    """
+    Validates the Douban cookie by using the core 'fetch_imdb_id_from_web'
+    function. This is the most reliable validation method as it directly
+    tests the functionality that requires a valid session.
+    """
+    print("\n🔍 正在验证 Douban Cookie 的有效性...")
+    test_douban_url = "https://m.douban.com/movie/subject/1298697/"
+    validation_id = await fetch_imdb_id_from_web(session, test_douban_url)
+    
+    if validation_id:
+        print(f"✅ Douban Cookie 验证通过 (获取到测试 ID: {validation_id})。")
+        return True
+    else:
+        print("❌ Cookie 无效或已过期。无法获取测试页面的 IMDb ID。")
+        return False
 
 # --- 缓存文件 ---
 IMDB_CACHE_FILE = "db_imdb.csv"
@@ -95,19 +115,17 @@ def load_imdb_cache():
             print(f"❌ Failed to delete corrupted cache file: {remove_err}")
         return {}
 
-def save_new_cache_entries(new_entries: list):
-    """Appends a list of new ID mappings to the cache file."""
-    if not new_entries:
+def save_imdb_cache(imdb_cache: dict):
+    """Saves the entire ID cache to the file, overwriting it to ensure integrity."""
+    if not imdb_cache:
         return
     
-    print(f"\n✍️  Appending {len(new_entries)} new entries to the IMDB cache file...")
-    file_exists = os.path.exists(IMDB_CACHE_FILE)
+    print(f"\n✍️  Saving {len(imdb_cache)} total entries to the IMDB cache file (overwrite)...")
     try:
-        with open(IMDB_CACHE_FILE, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            if not file_exists or os.path.getsize(IMDB_CACHE_FILE) == 0:
-                writer.writerow(['id', 'imdb'])
-            writer.writerows(new_entries)
+        # Convert dict to DataFrame and save, ensuring no duplicates and clean format
+        df = pd.DataFrame(list(imdb_cache.items()), columns=['id', 'imdb'])
+        df.drop_duplicates(subset=['id'], keep='last', inplace=True)
+        df.to_csv(IMDB_CACHE_FILE, index=False, encoding='utf-8')
     except IOError as e:
         print(f"❌ Error writing to cache file {IMDB_CACHE_FILE}: {e}")
 
@@ -146,16 +164,16 @@ def process_movie_data(interest_data):
 # --- 异步网络请求 ---
 async def fetch_movie_list_page(session, start_index, page_size=50, retries=3):
     params = {"type": "movie", "status": "done", "count": page_size, "start": start_index, "for_mobile": 1}
-    headers = {'User-Agent': BROWSER_USER_AGENT, 'Referer': 'https://m.douban.com/'}
 
     for attempt in range(retries):
         await asyncio.sleep(random.uniform(1.0, 2.0))
         try:
-            async with session.get(LIST_API_URL, headers=headers, params=params, verify_ssl=False, timeout=30) as r:
+            # The session is now initialized with headers, so we don't pass them here.
+            async with session.get(LIST_API_URL, params=params, verify_ssl=False, timeout=30) as r:
                 r.raise_for_status()
                 return await r.json()
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            print(f"❌ List request failed (start={start_index}, attempt {attempt + 1}/{retries}): {e}")
+            print(f"❌ List request failed (start={start_index}, attempt {attempt + 1}/{retries}): {type(e).__name__} - {e}")
             if attempt + 1 == retries:
                 print(f"❌ Max retries reached, giving up on page start={start_index}")
                 return None
@@ -183,64 +201,116 @@ async def process_interest(session, interest, imdb_cache):
 async def main():
     start_time = time.time()
     print(f"🎬 开始为用户 {DOUBAN_USER_ID} 爬取已看电影列表...")
-    output_filename = f"douban_{DOUBAN_USER_ID}_ratings.csv" # Changed output filename to match old pattern
+    output_filename = f"douban_{DOUBAN_USER_ID}_ratings.csv"
     imdb_cache = load_imdb_cache()
     print(f"✅ 已从 '{IMDB_CACHE_FILE}' 加载 {len(imdb_cache)} 条缓存记录。")
-    
-    async with aiohttp.ClientSession() as session:
-        print("🔍 正在获取电影总数...")
-        initial_data = await fetch_movie_list_page(session, 0, 1)
-        if not initial_data or 'total' not in initial_data:
-            print("❌ 无法获取电影总数，脚本终止。"); return
-        total_movies = initial_data['total']
-        print(f"✅ 找到 {total_movies} 部已看电影。")
 
-        print("\n🚀 步骤 1/2: 并发获取所有电影的基本信息...")
-        list_tasks = [fetch_movie_list_page(session, i, 50) for i in range(0, total_movies, 50)]
-        all_interests = []
-        for f in tqdm(asyncio.as_completed(list_tasks), total=len(list_tasks), desc="获取基本信息"):
-            page_data = await f
-            if page_data and 'interests' in page_data:
-                all_interests.extend(page_data['interests'])
+    # --- 增量更新逻辑: 加载已有数据 ---
+    df_existing = pd.DataFrame()
+    existing_ids = set()
+    if os.path.exists(output_filename):
+        try:
+            cols = pd.read_csv(output_filename, nrows=0, encoding='utf-8-sig').columns.tolist()
+            if 'DoubanID' not in cols:
+                print(f"⚠️  '{output_filename}' is in an old format (missing 'DoubanID'). Deleting it to recreate.")
+                os.remove(output_filename)
+            else:
+                df_existing = pd.read_csv(output_filename, dtype={'DoubanID': str}, encoding='utf-8-sig')
+                if not df_existing.empty:
+                    existing_ids = set(df_existing['DoubanID'].dropna().astype(str))
+                    print(f"✅ 已从 '{output_filename}' 加载 {len(existing_ids)} 条已有电影记录，将进行增量更新。")
+        except (pd.errors.EmptyDataError, FileNotFoundError):
+            print(f"⚠️  '{output_filename}' 存在但为空或无法读取, 将重新创建。")
+        except Exception as e:
+            print(f"❌ Error processing existing ratings file '{output_filename}': {e}. Will try to recreate it.")
+            try: os.remove(output_filename)
+            except OSError as remove_err: print(f"❌ Failed to delete problematic file: {remove_err}")
+
+    # Create a single session with the headers from config, to be used for all requests.
+    async with aiohttp.ClientSession(headers=DOUBAN_HEADERS) as session:
+        # --- Cookie Validation Step ---
+        if not await validate_cookie(session):
+            print("\n🛑 请根据 config.py 中的指引更新您的 Douban Cookie 后再试。")
+            return
+
+        # --- 智能增量获取逻辑 ---
+        print("\n🚀 步骤 1/2: 智能增量获取最新的电影记录...")
+        new_interests = []
+        should_stop_fetching = False
+        page_num = 0
+        page_size = 50
+
+        with tqdm(desc="增量获取页面", unit="page") as pbar:
+            while not should_stop_fetching:
+                page_data = await fetch_movie_list_page(session, page_num * page_size, page_size)
+                pbar.update(1)
+
+                if not page_data or 'interests' not in page_data or not page_data['interests']:
+                    pbar.set_description("已到达末页")
+                    break # Reached the end of the user's ratings
+
+                interests_on_page = page_data['interests']
+                
+                for interest in interests_on_page:
+                    douban_id = interest.get('subject', {}).get('id')
+                    if douban_id in existing_ids:
+                        pbar.set_description("发现重复记录,停止获取")
+                        should_stop_fetching = True
+                        break
+                    else:
+                        new_interests.append(interest)
+                
+                if should_stop_fetching:
+                    break
+                page_num += 1
+
+        if not new_interests:
+            print("\n✅ 数据已是最新，无需更新。")
+            end_time = time.time()
+            print(f"总耗时: {end_time - start_time:.2f} 秒")
+            return
+            
+        print(f"\n✅ 发现 {len(new_interests)} 条新记录。")
         
-        print(f"\n✅ 已获取 {len(all_interests)} 条基本电影记录。")
-        print("\n🚀 步骤 2/2: 并发从缓存或网页获取IMDB_ID...")
-        processing_tasks = [process_interest(session, interest, imdb_cache) for interest in all_interests]
-        all_movies_data = []
+        print("\n🚀 步骤 2/2: 并发从缓存或网页获取IMDB_ID (仅处理新电影)...")
+        processing_tasks = [process_interest(session, interest, imdb_cache) for interest in new_interests]
+        new_movies_data = []
         new_cache_entries = []
         for f in tqdm(asyncio.as_completed(processing_tasks), total=len(processing_tasks), desc="获取IMDB ID"):
             processed_data, new_cache_entry = await f
             if processed_data:
-                all_movies_data.append(processed_data)
+                new_movies_data.append(processed_data)
             if new_cache_entry:
                 new_cache_entries.append(new_cache_entry)
 
     if new_cache_entries:
-        save_new_cache_entries(new_cache_entries)
+        save_imdb_cache(imdb_cache)
 
-    if not all_movies_data:
-        print("\n🤷 没有找到任何电影数据，无法生成CSV。"); return
-
-    print(f"\n💾 正在将 {len(all_movies_data)} 条数据保存到 {output_filename}...")
-    df = pd.DataFrame(all_movies_data)
+    df_new = pd.DataFrame(new_movies_data)
     
-    # Ensure columns match the desired final output, reordering and dropping extras
+    # --- 增量更新逻辑: 合并数据 ---
+    df_final = pd.concat([df_new, df_existing], ignore_index=True)
+
+    print(f"\n💾 正在将 {len(df_final)} 条数据保存到 {output_filename}...")
+    
     final_columns = ['Const', 'Your Rating', 'Date Rated', 'Title', 'URL', 'Title Type', 
-                     'IMDb Rating', 'Runtime (mins)', 'Year', 'Genres', 'Num Votes', 
-                     'Release Date', 'Directors', 'MyComment']
+                     'Douban Rating', 'Runtime (mins)', 'Year', 'Genres', 'Num Votes', 
+                     'Release Date', 'Directors', 'MyComment', 'DoubanID']
     
-    # Add missing columns with default values if they don't exist
     for col in final_columns:
-        if col not in df.columns:
-            df[col] = None
+        if col not in df_final.columns:
+            df_final[col] = None
             
-    df = df[final_columns] # Reorder and select final columns
+    df_final = df_final[final_columns]
+    df_final.drop_duplicates(subset=['DoubanID'], keep='first', inplace=True)
+    df_final.sort_values(by='Date Rated', ascending=False, inplace=True)
     
-    df.sort_values(by='Date Rated', ascending=False, inplace=True)
-    df.to_csv(output_filename, index=False, encoding='utf-8-sig')
+    df_final.to_csv(output_filename, index=False, encoding='utf-8-sig')
 
     end_time = time.time()
     print("\n🎉 任务完成！")
+    print(f"新增 {len(df_new)} 条记录。")
+    print(f"总记录数: {len(df_final)}。")
     print(f"总耗时: {end_time - start_time:.2f} 秒")
     print(f"数据已保存在: {output_filename}")
 
