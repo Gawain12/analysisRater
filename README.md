@@ -1,49 +1,39 @@
-# Douban Movie Analysis Pipeline
+# CineSync: Douban & IMDb Rating Synchronization Tool
 
-This project is a command-line data pipeline for scraping, storing, and analyzing movie rating data from Douban and IMDb.
+CineSync is a powerful, command-line tool designed to synchronize your movie ratings between Douban and IMDb. If you keep ratings on both platforms, this tool automates the process of keeping them consistent.
 
 ## Features
 
-- **Modular Architecture**: Clear separation between scraping, data processing, and orchestration.
-- **Command-Line Interface**: All pipeline steps are managed through a powerful CLI (`main.py`).
-- **Dual Platform Scraping**: Supports fetching data from both Douban and IMDb.
-- **Persistent Storage**: Scraped data is loaded into a MySQL database for analysis.
-- **Data Analysis**: Includes scripts to calculate weighted scores and analyze user viewing habits.
-- **Incremental Scraping**: Scrapers are designed to fetch only new data, saving time on subsequent runs.
+- **Two-Way Sync**: Synchronize ratings from Douban to IMDb or from IMDb to Douban.
+- **Incremental Updates**: The scrapers are designed to only fetch your newest ratings, making subsequent runs fast and efficient.
+- **Safe by Default**: The `sync` command performs a "dry run" by default, showing you which movies it will update without making any changes.
+- **Direct API Interaction**: The tool uses the official platform APIs to update ratings, ensuring reliability.
 
 ## Project Structure
 
 ```
 .
-├── main.py             # Main CLI entry point to orchestrate the pipeline
-├── analysis/           # Data loading, processing, and analysis scripts
-│   └── data_processor.py
-├── config/             # Configuration files for database, APIs, etc.
-│   └── config.py
-├── Database/           # SQLAlchemy models and database connection logic
-│   └── myDb.py
-├── scrapers/           # Scripts to scrape data from Douban and IMDb
-│   ├── douban_scraper.py
-│   └── imdb_scraper.py
-├── web/                # (Optional) Decoupled Flask web interface
-├── requirements.txt    # Python package dependencies
-└── README.md
+├── main.py             # The main CLI entry point for all operations.
+├── data/               # Stores all generated CSVs and auth files.
+├── scrapers/           # Contains the scripts for fetching ratings.
+├── utils/              # Contains helper modules for merging and syncing.
+├── config/             # All your personal configuration lives here.
+└── requirements.txt    # Python package dependencies.
 ```
 
 ## Getting Started
 
-### Prerequisites
+### 1. Prerequisites
 
 - Python 3.10+
-- MySQL Server
 - Git
 
-### Installation
+### 2. Installation
 
 1.  **Clone the repository:**
     ```bash
-    git clone git@github.com:Gawain12/Douban.git
-    cd Douban
+    git clone <your-repo-url>
+    cd CineSync
     ```
 
 2.  **Install Python dependencies:**
@@ -51,34 +41,61 @@ This project is a command-line data pipeline for scraping, storing, and analyzin
     pip install -r requirements.txt
     ```
 
-3.  **Configure the application:**
-    - Open `config/config.py`.
-    - Fill in your `DATABASE_CONFIG` with your MySQL credentials.
-    - Add your Douban `cookie` to the `DOUBAN_CONFIG`.
-    - For the IMDb scraper, follow the in-script instructions to generate an `auth.json` file.
+### 3. Configuration
 
-### Usage
+This is the most important step. The tool needs your browser cookies to authenticate with Douban and IMDb.
 
-The primary entry point is `main.py`. You can control the entire pipeline from here.
+1.  Open `config/config.py`.
+2.  Follow the detailed instructions in the file to get your `Cookie` string from your browser for both Douban and IMDb.
+3.  Paste the cookies into the `DOUBAN_CONFIG` and `IMDB_CONFIG` sections.
+4.  Make sure your Douban and IMDb usernames are correctly set in the config file.
 
-**Run the full pipeline (Scrape Douban -> Load to DB -> Analyze):**
+## Usage
+
+All commands are run through `main.py`.
+
+### Step 1: Scrape Your Latest Ratings
+
+Before you can sync, you need to fetch your ratings from both platforms. The scraper will save them as CSV files in the `data/` directory.
+
 ```bash
-python main.py --full-pipeline --user <your_douban_id>
+# Scrape ratings from both Douban and IMDb
+python main.py scrape all
 ```
 
-**Run individual steps:**
+### Step 2: Compare and Synchronize Your Ratings
 
-- **Scrape Douban:**
-  ```bash
-  python main.py --scrape douban --user <your_douban_id>
-  ```
+Once you have your ratings scraped, you can use the `compare` and `sync` commands.
 
-- **Load CSV data into the database:**
-  ```bash
-  python main.py --load --user <your_douban_id>
-  ```
+**Important:** The order of the platforms matters. The first platform is always the **source** (where the ratings are coming FROM), and the second is the **target** (where the ratings are going TO).
 
-- **Perform data analysis:**
-  ```bash
-  python main.py --analyze --user <your_douban_id>
-  ```
+**Compare (Dry Run):**
+
+This command is for safely previewing changes. It shows you which movies are rated on the source but not the target. No changes will be made.
+
+```bash
+# Show movies rated on Douban but missing from IMDb
+python main.py compare douban imdb
+
+# Show movies rated on IMDb but missing from Douban
+python main.py compare imdb douban
+```
+
+**Sync (Live Run):**
+
+This command will add the missing ratings to the target platform. You must use the `--live` flag to execute the changes.
+
+```bash
+# Sync ratings FROM Douban TO IMDb
+python main.py sync douban imdb --live
+
+# Sync ratings FROM IMDb TO Douban
+python main.py sync imdb douban --live
+```
+
+You can also use the `--limit` flag to test the sync on a small number of the oldest movies:
+
+```bash
+# Test by syncing the 2 oldest un-synced movies from Douban to IMDb
+python main.py sync douban imdb --live --limit 2
+```

@@ -1,54 +1,153 @@
 import requests
 import csv
 import time
+import random
 import json
 import os
 import re
-import sys 
+import sys
 from datetime import datetime
+import pandas as pd
+from tqdm import tqdm
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config.config import IMDB_CONFIG
+from config.config import IMDB_CONFIG, DOUBAN_CONFIG
 
 class IMDbRatingsScraper:
     """
-    通过交叉获取移动端API和网页端数据，全面、高效地抓取IMDb用户评分。
-    V-Final-Incremental: 支持增量更新，极大提升后续运行速度。
+    Fetches IMDb user ratings incrementally and enriches them with Douban IDs.
     """
     def __init__(self):
+        # Load Config
         self.user_id = IMDB_CONFIG.get('user_id')
-        self.headers = IMDB_CONFIG.get('headers', {})
+        self.imdb_headers = IMDB_CONFIG.get('headers', {})
+        self.douban_headers = DOUBAN_CONFIG.get('headers', {})
 
-        # Validate that necessary headers are present in the config
-        if not self.user_id or not self.headers.get('Cookie'):
-            raise SystemExit(
-                "❌ 配置错误: 请确保在 `config.py` 的 `IMDB_CONFIG` 中提供了 'user_id', 'Cookie', 和 'x-api-key'。"
-            )
-        
-        print("✅ 已从 `config.py` 加载 IMDb 认证信息。")
+        # Set default User-Agent if not provided to avoid 403 errors
+        default_user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+        if 'User-Agent' not in self.imdb_headers:
+            self.imdb_headers['User-Agent'] = default_user_agent
+        if 'User-Agent' not in self.douban_headers:
+            self.douban_headers['User-Agent'] = default_user_agent
 
+        if not self.user_id or not self.imdb_headers.get('Cookie') or not self.douban_headers.get('Cookie'):
+            raise SystemExit("❌ Config Error: Ensure user_id and cookies are set for both IMDb and Douban.")
+
+        print("✅ Successfully loaded IMDb and Douban configurations.")
+
+        # Define base paths
+        self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+        # Filenames and URLs
+        self.output_filename = os.path.join(self.project_root, "data", f"imdb_{self.user_id}_ratings.csv")
         self.api_base_url = "https://api.graphql.imdb.com/"
         self.web_base_url = f"https://www.imdb.com/user/{self.user_id}/ratings"
+        self.douban_search_url = "https://m.douban.com/rexxar/api/v2/search"
+
+        # Session
         self.session = requests.Session()
 
-    def _fetch_api_page(self, cursor):
-        # (Unchanged)
-        payload = {"operationName": "userRatings", "variables": {"first": 250},"extensions": {"persistedQuery": {"version": 1, "sha256Hash": "ebf2387fd2ba45d62fc54ed2ffe3940086af52e700a1b3929a099d5fce23330a"}}}
-        if cursor: payload['variables']['after'] = cursor
+        # Caching
+        self.douban_id_cache_file = os.path.join(self.project_root, "data", "db_imdb.csv")
+        self.douban_id_cache = self._load_douban_id_cache()
+        self.newly_found_mappings = {}
+        print(f"✅ Loaded {len(self.douban_id_cache)} IMDb-to-Douban ID mappings from the central cache ('{self.douban_id_cache_file}').")
+        print(f"ℹ️  Output CSV will be saved to: {self.output_filename}")
+
+        # Load existing ratings for incremental check
+        self.existing_imdb_ids = self._load_existing_ratings()
+        print(f"✅ Found {len(self.existing_imdb_ids)} existing movie ratings in '{self.output_filename}'.")
+        print(f"✅ Found {len(self.existing_imdb_ids)} existing movie ratings in '{self.output_filename}'.")
+
+
+    def _load_existing_ratings(self):
+        if not os.path.exists(self.output_filename):
+            return set()
         try:
-            response = self.session.post(self.api_base_url, json=payload, headers=self.headers, timeout=30)
+            df = pd.read_csv(self.output_filename, usecols=['Const'], dtype={'Const': str})
+            return set(df['Const'].dropna())
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, KeyError, FileNotFoundError):
+            return set()
+
+    def _load_douban_id_cache(self):
+        if not os.path.exists(self.douban_id_cache_file):
+            return {}
+        try:
+            df = pd.read_csv(self.douban_id_cache_file, dtype={'id': str, 'imdb': str})
+            df.dropna(subset=['id', 'imdb'], inplace=True)
+            return pd.Series(df.id.values, index=df.imdb).to_dict()
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, KeyError) as e:
+            return {}
+
+    def _save_newly_found_mappings(self):
+        if not self.newly_found_mappings:
+            return
+        temp_cache_file = os.path.join(self.project_root, "imdb_douban_newly_found.csv")
+        print(f"\n✍️  Saving {len(self.newly_found_mappings)} newly discovered mappings to temporary file: {temp_cache_file}")
+        df = pd.DataFrame(list(self.newly_found_mappings.items()), columns=['imdb_id', 'douban_id'])
+        df.to_csv(temp_cache_file, index=False, encoding='utf-8')
+
+    def _fetch_api_page(self, cursor):
+        payload = {"operationName": "userRatings", "variables": {"first": 250, "after": cursor},"extensions": {"persistedQuery": {"version": 1, "sha256Hash": "ebf2387fd2ba45d62fc54ed2ffe3940086af52e700a1b3929a099d5fce23330a"}}}
+        try:
+            response = self.session.post(self.api_base_url, json=payload, headers=self.imdb_headers, timeout=30)
             response.raise_for_status(); return response.json()
-        except requests.RequestException as e: print(f"❌ API请求失败: {e}"); return None
+        except requests.RequestException as e: print(f"❌ API request failed: {e}"); return None
 
     def _fetch_web_page(self, page_num):
-        # (Unchanged)
         url = f"{self.web_base_url}?sort=date_added,desc&page={page_num}"
         try:
-            response = self.session.get(url, headers=self.headers, timeout=30)
+            response = self.session.get(url, headers=self.imdb_headers, timeout=30)
             response.raise_for_status(); return response.text
-        except requests.RequestException as e: print(f"❌ 网页请求失败: {e}"); return None
+        except requests.RequestException as e: print(f"❌ Web page request failed: {e}"); return None
+
+    def _fetch_all_personal_ratings(self):
+        print("\n🚀 Fetching all personal ratings from API...")
+        personal_data_map = {}
+        cursor = None
+        with tqdm(desc="Fetching API pages", unit="page") as pbar:
+            while True:
+                api_data = self._fetch_api_page(cursor)
+                if not api_data or api_data.get("errors"): break
+                ratings_data = api_data.get('data', {}).get('userRatings', {})
+                if not ratings_data or not ratings_data.get('edges'): break
+                for edge in ratings_data['edges']:
+                    node = edge.get('node', {}); imdb_id = node.get('title', {}).get('id')
+                    if not imdb_id: continue
+                    ur = node.get('userRating', {})
+                    rating_date_raw = ur.get('date')
+                    personal_data_map[imdb_id] = {
+                        'my_rating': ur.get('value'),
+                        'rating_date': datetime.fromisoformat(rating_date_raw.replace('Z', '+00:00')).strftime('%Y-%m-%d') if rating_date_raw else None
+                    }
+                page_info = ratings_data.get('pageInfo', {})
+                if page_info.get('hasNextPage'):
+                    cursor = page_info.get('endCursor'); pbar.update(1); pbar.set_postfix(total_ratings=len(personal_data_map))
+                else: break
+        print(f"✅ Finished API fetch. Found {len(personal_data_map)} personal ratings.")
+        return personal_data_map
+
+    def _fetch_douban_id(self, imdb_id):
+        if imdb_id in self.douban_id_cache: return self.douban_id_cache[imdb_id]
+        if imdb_id in self.newly_found_mappings: return self.newly_found_mappings[imdb_id]
+        time.sleep(random.uniform(0.5, 2.0))
+        params = {'q': imdb_id, 'type': 'movie', 'count': 1}
+        try:
+            response = self.session.get(self.douban_search_url, params=params, headers=self.douban_headers, timeout=20, verify=False)
+            response.raise_for_status(); data = response.json()
+            subjects = data.get('subjects')
+            if subjects and isinstance(subjects, list) and subjects:
+                douban_id = subjects[0].get('target_id')
+                if douban_id:
+                    print(f"  - [API] Found new mapping: IMDb {imdb_id} -> Douban {douban_id}")
+                    self.newly_found_mappings[imdb_id] = douban_id
+                    return douban_id
+            return None
+        except requests.RequestException as e: print(f"❌ Douban ID fetch for {imdb_id} failed: {e}"); return None
 
     def _parse_movie_details_from_node(self, node):
-        # (Unchanged, already safe and rich)
         details = {}; title_info = node.get('title', {}) or {}
         details['imdb_id'] = title_info.get('id');
         if not details['imdb_id']: return None
@@ -69,141 +168,102 @@ class IMDbRatingsScraper:
         details['director'] = ', '.join(directors)
         return details
 
-    def scrape_interleaved(self, existing_rating_ids=None):
-        """以交叉模式抓取并合并数据，支持增量更新。"""
-        if existing_rating_ids is None: existing_rating_ids = set()
-        print(f"\n🚀 开始抓取数据... (模式: {'增量更新' if existing_rating_ids else '首次完整扫描'})")
-        
+    def scrape_all_ratings(self):
+        personal_data_map = self._fetch_all_personal_ratings()
         newly_scraped_movies = []
+        page_num = 1
         stop_scraping = False
-        page_num, api_cursor, web_page = 1, None, 1; api_done, web_done = False, False
+        seen_on_previous_pages = set()
+        print("\n🚀 Fetching all public movie details from web pages (incrementally)...")
+        with tqdm(desc="Fetching web pages", unit="page") as pbar:
+            while not stop_scraping:
+                html_content = self._fetch_web_page(page_num)
+                if not html_content: break
+                match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', html_content, re.DOTALL)
+                if not match: break
+                
+                data = json.loads(match.group(1)); search_results = data['props']['pageProps']['mainColumnData']['advancedTitleSearch']
+                movies_on_page = [self._parse_movie_details_from_node(edge.get('node', {})) for edge in search_results.get('edges', [])]
+                movies_on_page = [m for m in movies_on_page if m]
 
-        while not stop_scraping and not (api_done and web_done):
-            print(f"\n--- 正在处理第 {page_num} 页 ---")
-            
-            personal_data_map_page = {}
-            if not api_done:
-                print("  - [API]  正在请求您的个人评分...")
-                # ... (API logic, unchanged)
-                api_data = self._fetch_api_page(api_cursor)
-                if api_data and not api_data.get("errors"):
-                    ratings_data = api_data.get('data', {}).get('userRatings')
-                    if ratings_data and ratings_data.get('edges'):
-                        edges = ratings_data.get('edges', [])
-                        for edge in edges:
-                            node = edge.get('node', {}); imdb_id = node.get('title', {}).get('id')
-                            if not imdb_id: continue
-                            ur = node.get('userRating', {})
-                            rating_date_raw = ur.get('date')
-                            personal_data_map_page[imdb_id] = {
-                                'my_rating': ur.get('value'),
-                                'rating_date': datetime.fromisoformat(rating_date_raw.replace('Z', '+00:00')).strftime('%Y-%m-%d') if rating_date_raw else None
-                            }
-                        print(f"  - [API]  已获取 {len(edges)} 条个人评分数据。")
-                        page_info = ratings_data.get('pageInfo', {}); api_cursor = page_info.get('endCursor')
-                        if not page_info.get('hasNextPage', False): api_done = True; print("  - [API]  您的所有个人评分已获取完毕。")
-                    else: api_done = True; print("  - [API]  未找到更多评分数据。")
-                else: api_done = True; print(f"  - [API]  请求失败或返回错误。")
+                # --- Loop Termination Check ---
+                # If all movies on this page have been seen before, it's a duplicate page.
+                current_page_ids = {movie['imdb_id'] for movie in movies_on_page if movie.get('imdb_id')}
+                if current_page_ids and current_page_ids.issubset(seen_on_previous_pages):
+                    print(f"\n[Page {page_num}] Detected duplicate page. All movies have been seen before. Stopping.")
+                    break
+                seen_on_previous_pages.update(current_page_ids)
+                # --------------------------------
 
-            if not web_done and not stop_scraping:
-                print("  - [Web]  正在批量获取电影公开详情...")
-                # ... (Web logic, unchanged)
-                html_content = self._fetch_web_page(web_page)
-                if html_content:
-                    match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', html_content, re.DOTALL)
-                    if match:
-                        data = json.loads(match.group(1)); search_results = data['props']['pageProps']['mainColumnData']['advancedTitleSearch']
-                        movies_on_page = [self._parse_movie_details_from_node(edge.get('node', {})) for edge in search_results.get('edges', [])]
-                        movies_on_page = [m for m in movies_on_page if m]
-                        
-                        movies_to_add_this_page = []
-                        for movie in movies_on_page:
-                            # --- 增量更新核心逻辑 ---
-                            if movie['imdb_id'] in existing_rating_ids:
-                                print(f"  - [INC]  发现已存在的电影 '{movie['title']}' (ID: {movie['imdb_id']})。停止扫描。")
-                                stop_scraping = True
-                                break # 停止处理本页的后续电影
-                            
-                            if movie['imdb_id'] in personal_data_map_page:
-                                movie.update(personal_data_map_page[movie['imdb_id']])
-                            movies_to_add_this_page.append(movie)
-                        
-                        newly_scraped_movies.extend(movies_to_add_this_page)
-                        print(f"  - [Merge] 本页新增了 {len(movies_to_add_this_page)} 条记录。")
-                        
-                        if not search_results.get('pageInfo', {}).get('hasNextPage', False): web_done = True; print("  - [Web]  所有公开电影页面已获取完毕。")
-                    else: web_done = True; print("  - [Web]  页面结构变化，未找到 __NEXT_DATA__。")
-                else: web_done = True; print("  - [Web]  请求失败。")
-            
-            page_num += 1; web_page += 1
-            if not stop_scraping and not (api_done and web_done): time.sleep(1.0)
-        
+                if not movies_on_page: break
+
+                print(f"\n[Page {page_num}] Found {len(movies_on_page)} movies. Processing...")
+                for movie in tqdm(movies_on_page, desc=f"Page {page_num}", leave=False):
+                    if movie['imdb_id'] in self.existing_imdb_ids:
+                        print(f"\n✅ Found existing movie ({movie['imdb_id']}: {movie['title']}). Stopping incremental scrape.")
+                        stop_scraping = True; break
+                    
+                    movie['douban_id'] = self._fetch_douban_id(movie['imdb_id'])
+                    if movie['imdb_id'] in personal_data_map: movie.update(personal_data_map[movie['imdb_id']])
+                    newly_scraped_movies.append(movie)
+
+                if not stop_scraping: page_num += 1; pbar.update(1); pbar.set_postfix(new_movies=len(newly_scraped_movies))
+
         return newly_scraped_movies
 
-
 def main():
+    # Unset proxy environment variables to prevent connection errors
+    os.environ.pop('HTTP_PROXY', None)
+    os.environ.pop('HTTPS_PROXY', None)
+
     start_time = time.time()
-    print("="*60 + "\n" + " IMDb 评分导出工具 V-Final (增量更新)".center(66) + "\n" + "="*60)
+    print("="*60 + "\n" + " IMDb Incremental Ratings Scraper ".center(60) + "\n" + "="*60)
     try:
         scraper = IMDbRatingsScraper()
-        
-        # Define the output path in the parent directory
-        output_filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f"imdb_{scraper.user_id}_ratings.csv")
-        
-        # Step 1: Load existing data for incremental update
-        existing_movies = []
-        existing_rating_ids = set()
-        if os.path.exists(output_filename):
-            try:
-                with open(output_filename, 'r', newline='', encoding='utf-8') as csvfile:
-                    reader = csv.DictReader(csvfile)
-                    for row in reader:
-                        existing_movies.append(row)
-                        if row.get('Const'):
-                            existing_rating_ids.add(row['Const'])
-                print(f"✅ 成功加载了 {len(existing_movies)} 条已存在的记录。")
-            except Exception as e:
-                print(f"⚠️ 读取现有CSV文件 '{output_filename}' 时出错: {e}。将执行完整扫描。")
+        newly_scraped_movies = scraper.scrape_all_ratings()
+        scraper._save_newly_found_mappings()
 
-        # Step 2: Run the scraper with the set of existing IDs
-        newly_scraped_movies = scraper.scrape_interleaved(existing_rating_ids)
+        if not newly_scraped_movies:
+            print("\n✅ No new movies found. Your local file is up to date.")
+            return
+
+        print(f"\n✅ Scraped {len(newly_scraped_movies)} new movies.")
         
-        # Step 3: Save results
-        if newly_scraped_movies:
-            print(f"\n✅ 增量更新完成，共找到 {len(newly_scraped_movies)} 条新记录。")
-            
-            export_fieldnames = ['Const', 'Your Rating', 'Date Rated', 'Title', 'URL', 'Title Type', 'IMDb Rating', 'Runtime (mins)', 'Year', 'Genres', 'Num Votes', 'Release Date', 'Directors']
-            
-            # Convert newly scraped data to the export format
-            new_export_data = []
-            for movie in newly_scraped_movies:
-                new_export_data.append({
-                    'Const': movie.get('imdb_id'), 'Your Rating': movie.get('my_rating'), 'Date Rated': movie.get('rating_date'),
-                    'Title': movie.get('title'), 'URL': f"https://www.imdb.com/title/{movie.get('imdb_id')}/",
-                    'Title Type': movie.get('title_type'), 'IMDb Rating': movie.get('imdb_rating'), 'Runtime (mins)': movie.get('runtime_minutes'),
-                    'Year': movie.get('year'), 'Genres': movie.get('genres'), 'Num Votes': movie.get('imdb_votes'),
-                    'Release Date': movie.get('release_date'), 'Directors': movie.get('director')
-                })
-            
-            # Combine new data with existing data (newest first)
-            combined_data = new_export_data + existing_movies
-            
-            with open(output_filename, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=export_fieldnames, extrasaction='ignore')
-                writer.writeheader()
-                writer.writerows(combined_data)
-            print(f"🎉 完美！已将 {len(combined_data)} 条完整记录以标准格式保存到文件: {output_filename}")
+        export_fieldnames = ['Const', 'Your Rating', 'Date Rated', 'Title', 'URL', 'Title Type', 'IMDb Rating', 'Runtime (mins)', 'Year', 'Genres', 'Num Votes', 'Release Date', 'Directors', 'douban_id']
+        export_data = []
+        for movie in newly_scraped_movies:
+            export_data.append({
+                'Const': movie.get('imdb_id'), 'Your Rating': movie.get('my_rating'), 'Date Rated': movie.get('rating_date'),
+                'Title': movie.get('title'), 'URL': f"https://www.imdb.com/title/{movie.get('imdb_id')}/",
+                'Title Type': movie.get('title_type'), 'IMDb Rating': movie.get('imdb_rating'), 'Runtime (mins)': movie.get('runtime_minutes'),
+                'Year': movie.get('year'), 'Genres': movie.get('genres'), 'Num Votes': movie.get('imdb_votes'),
+                'Release Date': movie.get('release_date'), 'Directors': movie.get('director'),
+                'douban_id': movie.get('douban_id')
+            })
+
+        df_new = pd.DataFrame(export_data)
+        
+        if os.path.exists(scraper.output_filename):
+            print(f"📖 Reading existing data from {scraper.output_filename} to merge...")
+            df_existing = pd.read_csv(scraper.output_filename)
+            df_combined = pd.concat([df_new, df_existing], ignore_index=True)
         else:
-            print("\n✅ 您的数据已是最新，无需更新。")
+            df_combined = df_new
+
+        df_final = df_combined.drop_duplicates(subset=['Const'], keep='first')
+        df_final.sort_values(by='Date Rated', ascending=False, inplace=True)
+        df_final.to_csv(scraper.output_filename, index=False, columns=export_fieldnames, encoding='utf-8-sig')
+
+        print(f"🎉 Success! Saved {len(df_final)} total records to: {scraper.output_filename}")
 
     except SystemExit as e:
-        print(f"\n脚本已终止: {e}")
+        print(f"\nScript terminated: {e}")
     except Exception as e:
-        import traceback; print(f"\n发生未知严重错误: {e}"); traceback.print_exc()
+        import traceback; print(f"\nAn unexpected error occurred: {e}"); traceback.print_exc()
     finally:
         duration = time.time() - start_time
         if duration > 1.0:
-            print("\n" + "="*60 + f"\n程序运行完毕，总耗时: {duration:.2f} 秒。\n" + "="*60)
+            print("\n" + "="*60 + f"\nProgram finished in {duration:.2f} seconds.\n" + "="*60)
 
 if __name__ == "__main__":
     main()

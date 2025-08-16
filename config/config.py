@@ -18,13 +18,31 @@ REDIS_CONFIG = {
 }
 
 # --- Scraper Configurations ---
-# INSTRUCTIONS:
-# 1. Open your browser's developer tools (F12).
-# 2. Go to the Network tab.
-# 3. Visit your Douban or IMDb ratings page.
-# 4. Find a relevant request (e.g., 'interests' for Douban, 'graphql' for IMDb).
-# 5. Right-click the request, choose "Copy as cURL", and paste it into a text editor.
-# 6. Copy the 'Cookie' string and paste it into the 'cookie' field below for the respective site.
+# ==============================================================================
+# HOW TO GET YOUR COOKIES
+#
+# This tool needs your browser cookies to securely access your ratings.
+# The process is simple and only takes a minute.
+#
+# 1. Open a new tab in Google Chrome (or any Chromium-based browser).
+# 2. Open the Developer Tools (Right-click anywhere -> Inspect, or press F12).
+# 3. Go to the "Network" tab in the Developer Tools.
+#
+# For Douban:
+#   a. Go to your "我看过的电影" (Watched Movies) page.
+#   b. In the Network tab, find a request named "interests". Click on it.
+#   c. In the "Headers" panel that appears, scroll down to "Request Headers".
+#   d. Find the "cookie:" line, and copy the ENTIRE long string of text.
+#   e. Paste it into the 'Cookie' field in DOUBAN_CONFIG below.
+#
+# For IMDb:
+#   a. Go to your "My Ratings" page on IMDb.
+#   b. In the Network tab, find a request named "graphql". Click on it.
+#   c. In the "Headers" panel, scroll down to "Request Headers".
+#   d. Find the "cookie:" line, and copy the ENTIRE long string of text.
+#   e. Paste it into the 'Cookie' field in IMDB_CONFIG below.
+# ==============================================================================
+
 # Douban Scraper Configuration
 DOUBAN_CONFIG = {
     'user': 'gawaint',
